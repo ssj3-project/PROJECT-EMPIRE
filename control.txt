@@ -1,0 +1,9 @@
+Package: com.dokkanbot.grabber
+Name: DokkanGrabber
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Intercepte les tokens Dokkan Battle et les envoie au bot Discord.
+Maintainer: DokkanBot
+Author: DokkanBot
+Section: Tweaks

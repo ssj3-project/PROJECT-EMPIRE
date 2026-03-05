@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dokkan Bot — Captcha</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #1a1a2e; color: #eee;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 20px;
+    }
+    .card {
+      background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+      padding: 28px 32px; max-width: 520px; width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    h1 { font-size: 1.4rem; color: #f4a400; text-align: center; margin-bottom: 6px; }
+    .sub { color: #aaa; font-size: 0.86rem; text-align: center; margin-bottom: 14px; }
+    hr { border: none; border-top: 1px solid #0f3460; margin: 14px 0; }
+    .step { display: flex; gap: 10px; margin-bottom: 9px; }
+    .num {
+      background: #f4a400; color: #111; border-radius: 50%;
+      width: 26px; height: 26px; min-width: 26px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: bold; font-size: 0.8rem;
+    }
+    .num.done { background: #27ae60; }
+    .txt { font-size: 0.85rem; color: #ccc; padding-top: 4px; }
+    .txt strong { color: #fff; }
+
+    /* iframe puzzle */
+    #iframe-wrap {
+      display: none; margin: 14px 0;
+      border: 2px solid #0f3460; border-radius: 8px;
+      overflow: hidden; background: #fff;
+    }
+    iframe { width: 100%; height: 420px; border: none; display: block; }
+
+    /* boutons */
+    .btn {
+      width: 100%; padding: 13px; border: none; border-radius: 8px;
+      font-size: 0.95rem; font-weight: bold; cursor: pointer;
+      transition: all 0.2s; margin-top: 8px;
+    }
+    #btn-open { background: #f4a400; color: #111; }
+    #btn-open:hover:not(:disabled) { background: #e09500; }
+    #btn-open:disabled { background: #444; color: #666; cursor: not-allowed; }
+    #btn-done { background: #27ae60; color: #fff; display: none; }
+    #btn-done:hover:not(:disabled) { background: #1e9651; }
+    #btn-done:disabled { background: #444; color: #666; cursor: not-allowed; }
+
+    /* status */
+    #status {
+      margin-top: 12px; padding: 12px 16px; border-radius: 8px;
+      font-size: 0.86rem; display: none; text-align: center; line-height: 1.5;
+    }
+    #status.ok      { background: #1a4a2e; color: #2ecc71; border: 1px solid #27ae60; }
+    #status.err     { background: #4a1a1a; color: #e74c3c; border: 1px solid #e74c3c; }
+    #status.loading { background: #1a2a4a; color: #7ec8e3; border: 1px solid #3498db; }
+    .hint { font-size: 0.76rem; color: #556; text-align: center; margin-top: 6px; }
+    .hint a { color: #7ec8e3; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>🐉 Dokkan Bot</h1>
+  <p class="sub">Résous le puzzle pour créer ton compte.</p>
+  <hr>
+
+  <div class="step">
+    <div class="num" id="n1">1</div>
+    <div class="txt">Clique <strong>"Ouvrir le puzzle"</strong></div>
+  </div>
+  <div class="step">
+    <div class="num" id="n2">2</div>
+    <div class="txt">Glisse la pièce au bon endroit, puis clique <strong>"OK"</strong></div>
+  </div>
+  <div class="step">
+    <div class="num" id="n3">3</div>
+    <div class="txt">Reviens ici et clique <strong>"J'ai résolu le puzzle"</strong></div>
+  </div>
+  <div class="step">
+    <div class="num" style="background:#3498db">4</div>
+    <div class="txt">Retourne sur Discord — le compte se crée automatiquement ✅</div>
+  </div>
+  <hr>
+
+  <!-- Puzzle Bandai en iframe -->
+  <div id="iframe-wrap">
+    <iframe id="puzzle-frame"
+      sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-top-navigation">
+    </iframe>
+  </div>
+
+  <button class="btn" id="btn-open" onclick="openPuzzle()">🔓 Ouvrir le puzzle</button>
+  <button class="btn" id="btn-done" onclick="confirmDone()">✅ J'ai résolu le puzzle</button>
+
+  <div id="status"></div>
+  <p class="hint" id="hint" style="display:none"></p>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════
+   INIT — récupère les paramètres depuis l'URL
+   ou depuis /get_captcha_url si absents
+══════════════════════════════════════════════════════ */
+var p          = new URLSearchParams(window.location.search);
+var discordId  = p.get('id')          || '';
+var sessionKey = p.get('key')         || '';
+var captchaKey = p.get('captcha_key') || '';
+var bandaiUrl  = '';   // URL complète cf.ishin-global.aktsk.com (avec Signature)
+
+/* ══════════════════════════════════════════════════════
+   BASE URL — garantit qu'on frappe toujours le bon port
+   même si un proxy sert la page sur un port différent.
+   Ex : nginx sur :80 → proxifie vers :8765 :
+        window.location.origin = "http://host:80"
+        On veut quand même taper le port Python = 8765.
+   On lit le port depuis l'URL ou on utilise l'origin.
+══════════════════════════════════════════════════════ */
+var _loc = window.location;
+// BASE_URL : utilise window.location.origin qui contient déjà le bon protocole
+// et le bon port (https://host pour ngrok, http://host:8765 pour localhost).
+// NE PAS reconstruire manuellement — origin est toujours correct.
+var BASE_URL = _loc.origin;
+
+function $id(id) { return document.getElementById(id); }
+function setStatus(msg, type) {
+  var el = $id('status');
+  el.innerHTML = msg; el.className = type; el.style.display = 'block';
+}
+
+/* Récupère les infos de session depuis le serveur Python */
+if (discordId) {
+  fetch(BASE_URL + '/get_captcha_url?id=' + discordId, {
+    headers: { 'ngrok-skip-browser-warning': '1' }
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.bandai_url)  bandaiUrl  = d.bandai_url;
+      if (d.session_key && !sessionKey) sessionKey = d.session_key;
+      if (d.captcha_key && !captchaKey) captchaKey = d.captcha_key;
+      if (!sessionKey) {
+        setStatus('Session expirée. Retape <strong>!create</strong> sur Discord.', 'err');
+        $id('btn-open').disabled = true;
+      }
+    })
+    .catch(function() {});
+} else {
+  setStatus('❌ ID Discord manquant. Retape <strong>!create</strong>.', 'err');
+  $id('btn-open').disabled = true;
+}
+
+/* ══════════════════════════════════════════════════════
+   ÉTAPE 1 — Ouvre la vraie page Bandai dans une iframe
+   La page Bandai charge le SDK Capy Puzzle elle-même.
+   Pas besoin de charger le SDK manuellement.
+   Si X-Frame-Options bloque l'iframe → ouvre un onglet.
+══════════════════════════════════════════════════════ */
+function openPuzzle() {
+  // Construit l'URL Bandai (utilise bandaiUrl si disponible, sinon reconstruit)
+  var url = bandaiUrl;
+  if (!url) {
+    if (!sessionKey) { setStatus('Session non chargée. Recharge la page.', 'err'); return; }
+    url = 'https://cf.ishin-global.aktsk.com/html/en/captcha/captcha.html'
+        + '?captcha_session_key=' + encodeURIComponent(sessionKey)
+        + (captchaKey ? '&captcha_key=' + encodeURIComponent(captchaKey) : '');
+  }
+
+  $id('btn-open').disabled    = true;
+  $id('btn-open').textContent = '⏳ Chargement...';
+  $id('n1').classList.add('done');
+
+  var frame = $id('puzzle-frame');
+  var wrap  = $id('iframe-wrap');
+
+  // Timeout : si l'iframe ne charge pas en 3s → ouvre dans un onglet
+  var t = setTimeout(function() { openInTab(url); }, 3000);
+
+  frame.onload = function() {
+    clearTimeout(t);
+    wrap.style.display        = 'block';
+    $id('btn-done').style.display = 'block';
+    $id('btn-open').textContent   = '⏳ Résous le puzzle...';
+    setStatus('⏳ Résous le puzzle ci-dessus puis clique le bouton vert.', 'loading');
+    $id('hint').innerHTML  = 'Puzzle non visible ? <a href="' + url + '" target="_blank">Ouvre dans un onglet</a>';
+    $id('hint').style.display = 'block';
+  };
+  frame.onerror = function() { clearTimeout(t); openInTab(url); };
+  frame.src = url;
+}
+
+function openInTab(url) {
+  window.open(url, '_blank');
+  $id('iframe-wrap').style.display  = 'none';
+  $id('btn-done').style.display     = 'block';
+  $id('btn-open').textContent       = '⏳ Résous le puzzle dans l\'onglet...';
+  setStatus(
+    '⏳ Puzzle ouvert dans un nouvel onglet.<br>'
+    + 'Résous-le, clique <strong>OK</strong>, puis le bouton vert ci-dessous.',
+    'loading'
+  );
+  $id('hint').innerHTML  = 'Onglet non ouvert ? <a href="' + url + '" target="_blank">Clique ici</a>';
+  $id('hint').style.display = 'block';
+}
+
+/* ══════════════════════════════════════════════════════
+   ÉTAPE 3 — L'user a résolu le puzzle et cliqué OK
+   On envoie la captcha_session_key au bot Python.
+   La SESSION KEY est celle retournée par Bandai dans le 401
+   lors du premier sign_up — c'est ELLE qui est validée par
+   le puzzle, pas une nouvelle clé.
+══════════════════════════════════════════════════════ */
+function confirmDone() {
+  if (!sessionKey) {
+    setStatus('❌ Session manquante. Retape !create.', 'err'); return;
+  }
+  var btn = $id('btn-done');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Envoi au bot...';
+  $id('n3').classList.add('done');
+  setStatus('⏳ Validation en cours...', 'loading');
+
+  fetch(BASE_URL + '/submit', {
+    method:  'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': '1'
+    },
+    body:    JSON.stringify({ discord_id: discordId, token: sessionKey })
+  })
+  .then(function(r) {
+    // Lit d'abord le texte brut pour diagnostiquer si ce n'est pas du JSON
+    return r.text().then(function(txt) {
+      var status = r.status;
+      var data;
+      try {
+        data = JSON.parse(txt);
+      } catch (parseErr) {
+        // Le serveur a renvoyé du HTML ou autre chose — affiche le début
+        var preview = txt.substring(0, 200).replace(/</g, '&lt;');
+        throw new Error(
+          'Le serveur a répondu HTTP ' + status + ' avec du contenu non-JSON.<br>'
+          + '<small style="color:#aaa">Réponse : ' + preview + '</small><br>'
+          + '<small style="color:#aaa">URL cible : ' + BASE_URL + '/submit</small>'
+        );
+      }
+      if (!data.ok) {
+        throw new Error(data.error || 'Erreur serveur HTTP ' + status);
+      }
+      return data;
+    });
+  })
+  .then(function() {
+    $id('iframe-wrap').style.display = 'none';
+    $id('hint').style.display        = 'none';
+    btn.textContent = '✅ Envoyé !';
+    setStatus(
+      '✅ Captcha validé !<br>Retourne sur Discord — ton compte est en cours de création.',
+      'ok'
+    );
+  })
+  .catch(function(e) {
+    setStatus('❌ ' + e.message, 'err');
+    btn.disabled    = false;
+    btn.textContent = '✅ J\'ai résolu le puzzle';
+  });
+}
+</script>
+</body>
+</html>
