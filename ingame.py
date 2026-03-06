@@ -246,27 +246,32 @@ def getMedals(ver, os, token, secret):
 
 # ══════════════════════════════════════════════════════════════ STAGES NORMAUX
 
-def getSupports(ver, os, token, secret, quest_id: int, stage_id: int, difficulty: int):
+def getSupports(ver, os, token, secret, quest_id: int, difficulty: int):
     '''
     GET /quests/{quest_id}/stages/{stage_id}/supporters — supporters disponibles.
     CORRECTION CRITIQUE : deux IDs distincts (quest_id ET stage_id).
     quest_id  = sugoroku_map_id // 10
     stage_id  = sugoroku_map_id  (le vrai stage, identique à sugoroku_map_id sans diff)
     '''
-    ep  = f'/quests/{quest_id}/stages/{stage_id}/supporters'
-    url = _base_url(ver) + ep + f'?difficulty={difficulty}'
+    #stage_id est inutile faut garder que quest_id et recuperer le team_num pour la requete
+    decks = getTeams(ver, os, token, secret)
+    team_num = decks.get('selected_team_num', 1)
+
+    ep  = f'/quests/{quest_id}/briefing?difficulty={difficulty}&force_update=&team_num={team_num}'
+    url = _base_url(ver) + ep 
     r   = requests.get(url, headers=_headers(ver, os, token, secret, 'GET', ep), timeout=_TIMEOUT)
     return _safe(r)
 
 
-def startStage(ver, os, token, secret, quest_id: int, stage_id: int, difficulty: int,
+def startStage(ver, os, token, secret, quest_id: int, difficulty: int,
                friend_id: int, friend_card_id: int, is_cpu: bool = False):
     '''
     POST /quests/{quest_id}/stages/{stage_id}/sugoroku_maps/start — démarre un stage.
     CORRECTION CRITIQUE : endpoint avec quest_id ET stage_id séparés.
     quest_id = sugoroku_map_id // 10
     '''
-    ep    = f'/quests/{quest_id}/stages/{stage_id}/sugoroku_maps/start'
+    #stage_id est inutile faut garder que quest_id
+    ep    = f'/quests/{quest_id}/sugoroku_maps/start'
     url   = _base_url(ver) + ep
     decks = getTeams(ver, os, token, secret)
     team_num = decks.get('selected_team_num', 1)
@@ -298,13 +303,15 @@ def startStage(ver, os, token, secret, quest_id: int, stage_id: int, difficulty:
     return _safe(r)
 
 
-def finishStage(ver, os, token, secret, quest_id: int, stage_id: int, difficulty: int,
+def finishStage(ver, os, token, secret, quest_id: int, difficulty: int,
                 paces: list, defeated: list, stoken: str):
     '''
     POST /quests/{quest_id}/stages/{stage_id}/sugoroku_maps/finish — termine un stage.
     CORRECTION CRITIQUE : endpoint avec quest_id ET stage_id séparés.
     '''
-    ep     = f'/quests/{quest_id}/stages/{stage_id}/sugoroku_maps/finish'
+
+    #stage_id est inutile faut garder que quest_id
+    ep     = f'/quests/{quest_id}/sugoroku_maps/finish'
     url    = _base_url(ver) + ep
     steps  = list(paces)
 
@@ -315,7 +322,7 @@ def finishStage(ver, os, token, secret, quest_id: int, stage_id: int, difficulty
 
     damage = randint(500_000, 1_000_000)
     # Hercule punching bag event (stages spéciaux)
-    if str(stage_id)[:3] in ('711', '185'):
+    if str(quest_id)[:3] in ('711', '185'):
         damage = randint(100_000_000, 101_000_000)
 
     sign_payload = {
